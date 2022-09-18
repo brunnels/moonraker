@@ -11,6 +11,7 @@ import struct
 import socket
 import asyncio
 import time
+from telemetrix import telemetrix
 
 # Annotation imports
 from typing import (
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from .http_client import HttpClient
     APIComp = klippy_apis.KlippyAPI
 
+
 class PrinterPower:
     def __init__(self, config: ConfigHelper) -> None:
         self.server = config.get_server()
@@ -53,7 +55,8 @@ class PrinterPower:
             "rf": RFDevice,
             "mqtt": MQTTDevice,
             "smartthings": SmartThings,
-            "hue": HueDevice
+            "hue": HueDevice,
+            "telemetrix": TelemetrixDevice
         }
 
         for section in prefix_sections:
@@ -393,6 +396,7 @@ class PowerDevice:
             self.init_task = None
         return None
 
+
 class HTTPDevice(PowerDevice):
     def __init__(self,
                  config: ConfigHelper,
@@ -521,6 +525,7 @@ class GpioDevice(PowerDevice):
         if self.timer_handle is not None:
             self.timer_handle.cancel()
             self.timer_handle = None
+
 
 class KlipperDevice(PowerDevice):
     def __init__(self, config: ConfigHelper) -> None:
@@ -681,6 +686,36 @@ class KlipperDevice(PowerDevice):
         if self.timer_handle is not None:
             self.timer_handle.cancel()
             self.timer_handle = None
+
+
+class TelemetrixDevice(GpioDevice):
+    def __init__(self, config: ConfigHelper):
+        super().__init__(config, initial_val=0)
+        self.board = telemetrix.Telemetrix(
+            com_port=config.get("com_port"),
+            arduino_instance_id=config.get("arduino_instance_id", 1),
+            arduino_wait=config.get("arduino_wait", 4)
+        )
+        self.board.set_pin_mode_digital_output(self.gpio_out.value)
+
+    def set_power(self, state) -> None:
+        if self.timer_handle is not None:
+            self.timer_handle.cancel()
+            self.timer_handle = None
+        try:
+            self.board.digital_write(
+                self.gpio_out.value,
+                1 if state == "on" else 0
+            )
+        except Exception:
+            self.board.shutdown()
+            self.state = "error"
+            msg = f"Error Toggling Device Power: {self.name}"
+            logging.exception(msg)
+            raise self.server.error(msg) from None
+        self.state = state
+        self._check_timer()
+
 
 class RFDevice(GpioDevice):
 
